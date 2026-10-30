@@ -357,7 +357,8 @@ namespace Foundation
             _confirmTimer = 0f;
             if (_confirmBar != null) _confirmBar.SetActive(false);
             RefreshDisplayButtons();
-            SetHint("Display settings saved.");
+            SetHint("Display settings saved. If the game cannot start with them next time, "
+                    + "it falls back to the previous resolution automatically.");
         }
 
         void RevertDisplay(string message)

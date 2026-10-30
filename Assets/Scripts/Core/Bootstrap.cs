@@ -49,6 +49,7 @@ namespace Foundation
 
         GameObject _menuRoot;
         GameObject _levelRoot;
+        float _displayConfirmTimer;
 
         void Awake()
         {
@@ -64,6 +65,25 @@ namespace Foundation
         {
             if (SettingsService.Instance.Data.session.skipMenu) StartGame();
             else ShowMainMenu();
+        }
+
+        void Update()
+        {
+            // A display change is only trusted after the game has actually rendered
+            // with it for a moment; otherwise the next launch restores the previous one.
+            SettingsData data = SettingsService.Instance != null ? SettingsService.Instance.Data : null;
+            if (data == null || !data.displayNeedsConfirm)
+            {
+                _displayConfirmTimer = 0f;
+                return;
+            }
+
+            _displayConfirmTimer += Time.unscaledDeltaTime;
+            if (_displayConfirmTimer >= 3f)
+            {
+                SettingsService.Instance.ConfirmDisplayRendered();
+                _displayConfirmTimer = 0f;
+            }
         }
 
         // ------------------------------------------------------------- screens

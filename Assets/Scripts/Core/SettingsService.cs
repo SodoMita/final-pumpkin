@@ -95,6 +95,10 @@ namespace Foundation
     {
         public int version = 1;
         public DisplaySettings display = new DisplaySettings();
+        /// Last display configuration known to render successfully.
+        public DisplaySettings displayFallback = new DisplaySettings();
+        /// True while a freshly committed display setting has not survived a frame yet.
+        public bool displayNeedsConfirm = false;
         public AudioSettings audio = new AudioSettings();
         public ControlSettings controls = new ControlSettings();
         public TouchSettings touch = new TouchSettings();
@@ -173,6 +177,19 @@ namespace Foundation
             }
 
             Data.display = RepairDisplay(Data.display);
+            Data.displayFallback = RepairDisplay(Data.displayFallback);
+
+            // The previous session committed a display change and never survived a
+            // frame with it (crash, black screen, unplugged monitor). Go back to
+            // the last configuration that did render.
+            if (Data.displayNeedsConfirm)
+            {
+                Debug.LogWarning("[Settings] Last resolution was never confirmed; restoring "
+                                 + $"{Data.displayFallback.width}x{Data.displayFallback.height}.");
+                Data.display = Data.displayFallback.Clone();
+                Data.displayNeedsConfirm = false;
+                Save();
+            }
         }
 
         public void Save()
@@ -190,6 +207,7 @@ namespace Foundation
         static SettingsData Repair(SettingsData data)
         {
             if (data.display == null) data.display = new DisplaySettings();
+            if (data.displayFallback == null) data.displayFallback = new DisplaySettings();
             if (data.audio == null) data.audio = new AudioSettings();
             if (data.controls == null) data.controls = new ControlSettings();
             if (data.touch == null) data.touch = new TouchSettings();
@@ -279,7 +297,9 @@ namespace Foundation
         public void CommitDisplay()
         {
             if (!_displayStaged || PendingDisplay == null) return;
+            Data.displayFallback = Data.display.Clone();
             Data.display = PendingDisplay.Clone();
+            Data.displayNeedsConfirm = true;
             _displayStaged = false;
             PendingDisplay = null;
             Save();
@@ -290,10 +310,21 @@ namespace Foundation
         public void RevertDisplay()
         {
             if (!_displayStaged) return;
+            Data.displayNeedsConfirm = false;
             ApplyDisplay(_backupDisplay, false);
             _displayStaged = false;
             PendingDisplay = null;
             DisplayReverted?.Invoke();
+        }
+
+        /// Called once the game has rendered a few seconds with the committed
+        /// display settings: from now on they are considered safe to restore.
+        public void ConfirmDisplayRendered()
+        {
+            if (!Data.displayNeedsConfirm) return;
+            Data.displayNeedsConfirm = false;
+            Data.displayFallback = Data.display.Clone();
+            Save();
         }
 
         // ------------------------------------------------------------- resets
