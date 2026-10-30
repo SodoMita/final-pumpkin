@@ -61,7 +61,7 @@ namespace Foundation
                 float value = raw * dir;
                 return value > 0f ? value : 0f;
             }
-            return key != KeyCode.None && Input.GetKey(key) ? 1f : 0f;
+            return SafeKey(key) ? 1f : 0f;
         }
 
         public bool Held()
@@ -72,7 +72,35 @@ namespace Foundation
         public bool Pressed()
         {
             if (IsAxis) return false; // edge detection for axes lives in InputService
-            return key != KeyCode.None && Input.GetKeyDown(key);
+            return SafeKeyDown(key);
+        }
+
+        /// The legacy Input class throws outside play mode; never let that
+        /// escape into gameplay or tests.
+        public static bool SafeKey(KeyCode code)
+        {
+            if (code == KeyCode.None) return false;
+            try
+            {
+                return Input.GetKey(code);
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        public static bool SafeKeyDown(KeyCode code)
+        {
+            if (code == KeyCode.None) return false;
+            try
+            {
+                return Input.GetKeyDown(code);
+            }
+            catch (Exception)
+            {
+                return false;
+            }
         }
 
         /// Reads an axis without throwing if the project is missing the entry.
@@ -248,11 +276,13 @@ namespace Foundation
         {
             _virtualMove = Mathf.Clamp(move, -1f, 1f);
             _virtualTurn = Mathf.Clamp(turn, -1f, 1f);
+            _frame = -1;
         }
 
         public void SetVirtualHold(GameAction action, bool held)
         {
             _virtualHold[(int)action] = held;
+            _frame = -1;
         }
 
         public void ClearVirtualInput()
@@ -260,6 +290,7 @@ namespace Foundation
             _virtualMove = 0f;
             _virtualTurn = 0f;
             for (int i = 0; i < _virtualHold.Length; i++) _virtualHold[i] = false;
+            _frame = -1;
         }
 
         // ------------------------------------------------------------ bindings

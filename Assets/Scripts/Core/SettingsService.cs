@@ -251,7 +251,7 @@ namespace Foundation
                 // Phones own their screen; only frame rate and quality apply.
                 Screen.sleepTimeout = SleepTimeout.NeverSleep;
             }
-            else
+            else if (CanChangeResolution)
             {
                 FullScreenMode mode = FullScreenMode.Windowed;
                 if (display.mode == DisplaySettings.ModeBorderless) mode = FullScreenMode.FullScreenWindow;
@@ -259,7 +259,14 @@ namespace Foundation
 
                 int w = Mathf.Clamp(display.width, MinWidth, MaxWidth);
                 int h = Mathf.Clamp(display.height, MinHeight, MaxHeight);
-                Screen.SetResolution(w, h, mode);
+                try
+                {
+                    Screen.SetResolution(w, h, mode);
+                }
+                catch (Exception e)
+                {
+                    Debug.LogWarning("[Settings] Could not apply resolution: " + e.Message);
+                }
             }
 
             QualitySettings.vSyncCount = display.vsync ? 1 : 0;
@@ -268,6 +275,18 @@ namespace Foundation
             if (display.qualityLevel >= 0 && display.qualityLevel < QualitySettings.names.Length)
             {
                 QualitySettings.SetQualityLevel(display.qualityLevel, true);
+            }
+        }
+
+        /// Batch builds and -nographics runs have no window to resize; asking the
+        /// display server for one there only produces error logs (which CI treats
+        /// as test failures).
+        static bool CanChangeResolution
+        {
+            get
+            {
+                if (Application.isBatchMode) return false;
+                return SystemInfo.graphicsDeviceType != UnityEngine.Rendering.GraphicsDeviceType.Null;
             }
         }
 
