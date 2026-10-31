@@ -25,6 +25,7 @@ namespace Foundation
             BuildGeometry(root);
             BuildCameras(root, player);
             BuildZombies(root, player);
+            BuildProps(root);
 
             BuildHud(root);
             root.gameObject.AddComponent<PauseScreen>().Build();
@@ -90,15 +91,23 @@ namespace Foundation
             return player.transform;
         }
 
-        /// The Anny zombies are loaded at runtime from StreamingAssets, so this
-        /// only creates the container and the spawner; the meshes appear a few
-        /// frames later.
+        /// The Anny zombies are FBX prefabs under Resources, so the spawner
+        /// instantiates them immediately.
         static void BuildZombies(Transform root, Transform player)
         {
             var container = new GameObject("Zombies");
             container.transform.SetParent(root, false);
             var spawner = container.AddComponent<ZombieSpawner>();
             spawner.Target = player;
+        }
+
+        /// The pumpkin that gave the project its name: a prop in the middle of
+        /// the room that splits apart on a loop.
+        static void BuildProps(Transform root)
+        {
+            var props = new GameObject("Props");
+            props.transform.SetParent(root, false);
+            PumpkinProp.Create(props.transform, new Vector3(0f, PumpkinProp.GroundOffset, -3.5f), 20f);
         }
 
         static void BuildGeometry(Transform root)

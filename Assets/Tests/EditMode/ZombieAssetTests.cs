@@ -70,6 +70,33 @@ namespace Foundation.Tests
         }
 
         [Test]
+        public void PumpkinShipsAsAPropWithItsPalette()
+        {
+            const string model = "Assets/Resources/Props/animated_pumpkin.fbx";
+            const string palette = "Assets/Resources/Props/pumpkin_colors.png";
+
+            Assert.IsTrue(File.Exists(model), $"Missing prop model: {model}");
+            Assert.IsTrue(File.Exists(palette), $"Missing prop palette: {palette}");
+
+            var importer = AssetImporter.GetAtPath(model) as ModelImporter;
+            Assert.IsNotNull(importer, $"No ModelImporter for {model}");
+            Assert.AreEqual(ModelImporterAnimationType.Legacy, importer.animationType,
+                            "The pumpkin's clips drive transforms, so it needs a Legacy rig too");
+
+            int clips = 0;
+            foreach (Object asset in AssetDatabase.LoadAllAssetsAtPath(model))
+                if (asset is AnimationClip clip && !clip.name.StartsWith("__preview__")) clips++;
+            Assert.GreaterOrEqual(clips, 1, "The pumpkin has no animation clips");
+
+            var texture = AssetDatabase.LoadAssetAtPath<Texture2D>(palette);
+            Assert.IsNotNull(texture, "The palette did not import as a texture");
+            var textureImporter = AssetImporter.GetAtPath(palette) as TextureImporter;
+            Assert.IsNotNull(textureImporter);
+            Assert.AreEqual(FilterMode.Point, textureImporter.filterMode,
+                            "A palette image must not be filtered, or the colours bleed");
+        }
+
+        [Test]
         public void SkeletonIsTheAnnySkeleton()
         {
             string path = AssetPath(ZombieVariant.Shambler) + ".fbx";

@@ -114,6 +114,30 @@ namespace Foundation.Tests
         }
 
         [UnityTest]
+        public IEnumerator PumpkinSpawnsTexturedAndAnimated()
+        {
+            var host = new GameObject("PumpkinHost");
+            PumpkinProp pumpkin = PumpkinProp.Create(host.transform, Vector3.zero);
+            yield return null;
+
+            Assert.IsNotNull(pumpkin, "The pumpkin prop failed to spawn");
+            Assert.IsNotNull(pumpkin.Animation, "The pumpkin has no Animation component");
+            Assert.Greater(pumpkin.Clips.Length, 0, "The pumpkin has no clips");
+            Assert.IsTrue(pumpkin.IsPlaying, "The pumpkin is not animating");
+
+            var renderers = host.GetComponentsInChildren<Renderer>();
+            Assert.GreaterOrEqual(renderers.Length, 1, "The pumpkin has no renderers");
+            Material material = renderers[0].sharedMaterial;
+            Assert.IsNotNull(material, "The pumpkin has no material");
+            Texture texture = material.HasProperty("_BaseMap") ? material.GetTexture("_BaseMap")
+                                                             : material.mainTexture;
+            Assert.IsNotNull(texture, "The palette texture was not applied");
+
+            Object.Destroy(host);
+            yield return null;
+        }
+
+        [UnityTest]
         public IEnumerator SpawnerBuildsTheWholeHorde()
         {
             var host = new GameObject("ZombieTestHost");
