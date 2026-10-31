@@ -59,6 +59,10 @@ namespace Foundation
             controller.slopeLimit = 45f;
             controller.stepOffset = 0.35f;
             controller.skinWidth = 0.02f;
+            // Unity drops any Move() smaller than minMoveDistance (default 0.001).
+            // At high frame rates a walk step is smaller than that and the character
+            // silently stops moving, so let every millimetre through.
+            controller.minMoveDistance = 0f;
 
             var visual = new GameObject("Visual").transform;
             visual.SetParent(player.transform, false);

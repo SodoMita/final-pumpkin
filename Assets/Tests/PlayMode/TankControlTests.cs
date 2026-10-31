@@ -46,6 +46,7 @@ namespace Foundation.Tests
             controller.height = 1.8f;
             controller.radius = 0.4f;
             controller.center = new Vector3(0f, 0.9f, 0f);
+            controller.minMoveDistance = 0f; // match LevelBuilder: batch runs at thousands of fps
             _tank = _player.AddComponent<PlayerTankController>();
 
             InputService.Instance.ClearVirtualInput();
