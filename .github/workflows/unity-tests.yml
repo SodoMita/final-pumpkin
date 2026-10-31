@@ -73,7 +73,9 @@ jobs:
           artifactsPath: ${{ matrix.testMode }}-artifacts
           githubToken: ${{ secrets.GITHUB_TOKEN }}
           checkName: ${{ matrix.testMode }} results
-          customParameters: -nographics -logFile -
+          # -force-free keeps the editor on the free license instead of waiting on
+          # an entitlement refresh, which is where the batch-mode runs stalled.
+          customParameters: -nographics -force-free
           # Pin the game-ci CLI instead of resolving "latest" through the GitHub API,
           # which can return 403 when the runner's shared IP is rate limited.
           cliVersion: v0.1.72
