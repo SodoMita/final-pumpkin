@@ -128,6 +128,11 @@ namespace Foundation.Tests
         {
             _input.SetBinding(GameAction.Action, 0, Binding.FromKey(KeyCode.F));
 
+            Assert.Greater(_settings.Data.bindings.Count, 0, "SetBinding must push the bindings into SettingsData");
+            string path = Path.Combine(Application.persistentDataPath, SettingsService.FileName);
+            Assert.IsTrue(File.Exists(path), "bindings must be written to disk");
+            StringAssert.Contains("Action", File.ReadAllText(path), "saved file must contain the action name");
+
             // Relaunch: the previous services must be gone before new ones exist.
             Object.DestroyImmediate(_host);
             _host = null;
@@ -176,13 +181,18 @@ namespace Foundation.Tests
         public void VirtualHold_DrivesDiscreteActions()
         {
             _input.SetVirtualHold(GameAction.Aim, true);
+            _input.PollNow();
+
             Assert.IsTrue(_input.GetHeld(GameAction.Aim), "held while the finger is down");
-            Assert.IsTrue(_input.GetPressed(GameAction.Aim), "the first frame counts as a press");
+            Assert.IsTrue(_input.GetPressed(GameAction.Aim), "the first poll counts as a press");
 
             // Pressed must fall away on the next poll even if the finger stays down.
+            _input.PollNow();
+            Assert.IsTrue(_input.GetHeld(GameAction.Aim), "still held");
             Assert.IsFalse(_input.GetPressed(GameAction.Aim), "press is edge-triggered");
 
             _input.SetVirtualHold(GameAction.Aim, false);
+            _input.PollNow();
             Assert.IsFalse(_input.GetHeld(GameAction.Aim));
         }
     }

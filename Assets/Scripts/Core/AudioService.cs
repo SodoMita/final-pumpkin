@@ -44,6 +44,11 @@ namespace Foundation
             }
         }
 
+        public void Init()
+        {
+            Instance = this;
+        }
+
         void Update()
         {
             if (!_settings.muteWhenUnfocused) return;

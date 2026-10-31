@@ -28,6 +28,7 @@ namespace Foundation
 
             root.AddComponent<AudioListener>();
 
+            AudioService.Instance.Init();
             settings.Init();
             InputService.Instance.Init();
             game.Init();

@@ -166,6 +166,9 @@ namespace Foundation
 
         public void Init()
         {
+            // Awake is not invoked for components created in EditMode tests or by
+            // tooling, so the singleton is established here as well.
+            Instance = this;
             LoadBindings();
         }
 
@@ -217,6 +220,16 @@ namespace Foundation
                 if (value > best) best = value;
             }
             return best;
+        }
+
+        /// <summary>
+        /// Re-runs the input poll immediately. The game polls once per frame on its
+        /// own; this exists so tools and tests can step the input without a frame.
+        /// </summary>
+        public void PollNow()
+        {
+            _frame = -1;
+            EnsureFrame();
         }
 
         void EnsureFrame()

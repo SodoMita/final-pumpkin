@@ -153,6 +153,9 @@ namespace Foundation
 
         public void Init()
         {
+            // Awake is not invoked for components created in EditMode tests or by
+            // tooling, so the singleton is established here as well.
+            Instance = this;
             Load();
             ApplyAll();
         }
