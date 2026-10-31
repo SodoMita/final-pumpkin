@@ -57,7 +57,7 @@ namespace Foundation.Tests
             foreach (ZombieVariant variant in ZombieFactory.AllVariants)
             {
                 byte[] bytes = File.ReadAllBytes(PathFor(variant));
-                string json = ExtractJsonChunk(bytes, 20);
+                string json = ExtractJsonChunk(bytes, 12);
 
                 StringAssert.Contains("\"skins\"", json, $"{variant} has no skin");
                 StringAssert.Contains("JOINTS_0", json, $"{variant} has no joint weights");
@@ -70,8 +70,8 @@ namespace Foundation.Tests
             }
         }
 
-        /// The GLB layout is: 12-byte header, then chunks of (length, type, payload).
-        /// The first chunk is always the JSON document.
+        /// The GLB layout is: 12-byte header, then chunks of (length, type, payload)
+        /// starting at offset 12. The first chunk is always the JSON document.
         static string ExtractJsonChunk(byte[] bytes, int offset)
         {
             int chunkLength = System.BitConverter.ToInt32(bytes, offset);

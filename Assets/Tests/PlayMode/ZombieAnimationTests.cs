@@ -91,15 +91,20 @@ namespace Foundation.Tests
             Assert.IsTrue(zombie.Animation.isPlaying, "Animation is not playing");
             Assert.AreEqual(ZombieFactory.ShambleClipName, zombie.Driver.CurrentClip);
 
-            Transform bone = zombie.Root.GetComponentInChildren<SkinnedMeshRenderer>().bones[20];
-            Quaternion before = bone.localRotation;
+            Transform[] bones = zombie.Root.GetComponentInChildren<SkinnedMeshRenderer>().bones;
+            var before = new Quaternion[bones.Length];
+            for (int i = 0; i < bones.Length; i++) before[i] = bones[i].localRotation;
 
-            // Let a second of the walk cycle through.
-            float wait = Time.realtimeSinceStartup + 1f;
+            // Let half a walk cycle through.
+            float wait = Time.realtimeSinceStartup + 0.8f;
             while (Time.realtimeSinceStartup < wait) yield return null;
 
-            Assert.Greater(Quaternion.Angle(before, bone.localRotation), 0.5f,
-                "A bone did not move, so the clip is not actually driving the rig");
+            float moved = 0f;
+            for (int i = 0; i < bones.Length; i++)
+                moved = Mathf.Max(moved, Quaternion.Angle(before[i], bones[i].localRotation));
+
+            Assert.Greater(moved, 0.5f,
+                "No bone rotated, so the clips are not actually driving the rig");
         }
 
         [UnityTest]

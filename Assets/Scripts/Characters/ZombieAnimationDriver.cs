@@ -31,6 +31,7 @@ namespace Foundation
         [SerializeField] float noticeDistance = 14f;
 
         Animation _animation;
+        string _currentClip;
         State _state = State.Shamble;
         float _stateTimer;
         bool _bound;
@@ -43,10 +44,10 @@ namespace Foundation
             get { return _state; }
         }
 
-        /// <summary>Name of the clip currently playing, or null before Bind.</summary>
+        /// <summary>Name of the clip this driver last started, or null before Bind.</summary>
         public string CurrentClip
         {
-            get { return _animation != null && _animation.clip != null ? _animation.clip.name : null; }
+            get { return _currentClip; }
         }
 
         public Animation Animation
@@ -157,8 +158,10 @@ namespace Foundation
         {
             if (_animation == null || string.IsNullOrEmpty(clipName)) return;
             if (_animation.GetClip(clipName) == null) return;
-            if (CurrentClip == clipName && _animation.isPlaying) return;
+            if (_currentClip == clipName && _animation.isPlaying) return;
             _animation.CrossFade(clipName, fade);
+            // CrossFade leaves Animation.clip alone, so remember what we asked for.
+            _currentClip = clipName;
         }
 
         float LungeDuration()
