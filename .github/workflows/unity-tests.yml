@@ -67,6 +67,9 @@ jobs:
           githubToken: ${{ secrets.GITHUB_TOKEN }}
           checkName: ${{ matrix.testMode }} results
           customParameters: -nographics
+          # Pin the game-ci CLI instead of resolving "latest" through the GitHub API,
+          # which can return 403 when the runner's shared IP is rate limited.
+          cliVersion: v0.1.72
 
       - name: Upload test results
         if: always()
