@@ -1,83 +1,85 @@
 using System.IO;
-using System.Text;
 using NUnit.Framework;
+using UnityEditor;
 using UnityEngine;
 
 namespace Foundation.Tests
 {
     /// <summary>
-    /// Cheap structural checks on the baked Anny zombies. These run in edit mode
-    /// (no glTFast, no player loop) so a broken exporter is caught before the
-    /// heavier play mode tests try to load anything.
+    /// Checks the Anny zombie assets that ship with the project: an FBX per
+    /// variant imported as a Legacy rig, plus the AI-generated albedo map that
+    /// goes with it. Runs in edit mode so a broken bake fails fast.
     /// </summary>
     public class ZombieAssetTests
     {
-        static string PathFor(ZombieVariant variant)
+        static string AssetPath(ZombieVariant variant)
         {
-            return Path.Combine(Application.streamingAssetsPath, ZombieFactory.FolderName,
-                                ZombieFactory.FileName(variant));
+            return "Assets/Resources/Zombies/zombie_" + variant.ToString().ToLowerInvariant();
         }
 
         [Test]
-        public void EveryVariantShipsAGlb()
+        public void EveryVariantShipsAfbx()
         {
             foreach (ZombieVariant variant in ZombieFactory.AllVariants)
             {
-                string path = PathFor(variant);
-                Assert.IsTrue(File.Exists(path), $"Missing zombie asset: {path}");
-                Assert.Greater(new FileInfo(path).Length, 64 * 1024, $"Suspiciously small asset: {path}");
+                string path = AssetPath(variant) + ".fbx";
+                Assert.IsTrue(File.Exists(path), $"Missing zombie model: {path}");
+                Assert.Greater(new FileInfo(path).Length, 256 * 1024, $"Suspiciously small model: {path}");
             }
         }
 
         [Test]
-        public void AssetsAreGltfBinaryVersion2()
+        public void EveryVariantShipsAnAiAlbedoMap()
         {
             foreach (ZombieVariant variant in ZombieFactory.AllVariants)
             {
-                string path = PathFor(variant);
-                byte[] header = new byte[12];
-                long length;
-                using (FileStream stream = File.OpenRead(path))
+                string path = AssetPath(variant) + "_albedo.png";
+                Assert.IsTrue(File.Exists(path), $"Missing albedo: {path}");
+
+                var texture = AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+                Assert.IsNotNull(texture, $"Albedo did not import as a texture: {path}");
+                Assert.GreaterOrEqual(texture.width, 512, "Albedo is too small to read as detail");
+                Assert.AreEqual(texture.width, texture.height, "Albedo should be square (the bake is square)");
+            }
+        }
+
+        [Test]
+        public void ModelsImportAsLegacyRigsWithThreeClips()
+        {
+            foreach (ZombieVariant variant in ZombieFactory.AllVariants)
+            {
+                string path = AssetPath(variant) + ".fbx";
+                var importer = AssetImporter.GetAtPath(path) as ModelImporter;
+                Assert.IsNotNull(importer, $"No ModelImporter for {path}");
+                Assert.AreEqual(ModelImporterAnimationType.Legacy, importer.animationType,
+                                $"{path} must import as a Legacy rig or the clips need an AnimatorController");
+                Assert.IsTrue(importer.importAnimation, $"{path} must import animation");
+
+                Object[] assets = AssetDatabase.LoadAllAssetsAtPath(path);
+                int clips = 0;
+                int skinned = 0;
+                foreach (Object asset in assets)
                 {
-                    Assert.GreaterOrEqual(stream.Length, 20, "GLB too short");
-                    length = stream.Length;
-                    stream.Read(header, 0, header.Length);
+                    if (asset is AnimationClip clip && !clip.name.StartsWith("__preview__")) clips++;
+                    if (asset is GameObject go && go.GetComponentInChildren<SkinnedMeshRenderer>() != null) skinned++;
                 }
 
-                Assert.AreEqual("glTF", Encoding.ASCII.GetString(header, 0, 4), "Bad GLB magic");
-                Assert.AreEqual(2, System.BitConverter.ToInt32(header, 4), "Unexpected GLB version");
-                Assert.AreEqual(length, System.BitConverter.ToInt32(header, 8),
-                                "GLB length header does not match the file");
+                Assert.AreEqual(3, clips, $"{path} should contain Shamble, Idle and Lunge");
+                Assert.GreaterOrEqual(skinned, 1, $"{path} has no skinned mesh");
             }
         }
 
         [Test]
-        public void AssetsCarrySkinnedMeshAndThreeClips()
+        public void SkeletonIsTheAnnySkeleton()
         {
-            foreach (ZombieVariant variant in ZombieFactory.AllVariants)
-            {
-                byte[] bytes = File.ReadAllBytes(PathFor(variant));
-                string json = ExtractJsonChunk(bytes, 12);
+            string path = AssetPath(ZombieVariant.Shambler) + ".fbx";
+            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(path);
+            Assert.IsNotNull(prefab, "Shambler did not import as a prefab");
 
-                StringAssert.Contains("\"skins\"", json, $"{variant} has no skin");
-                StringAssert.Contains("JOINTS_0", json, $"{variant} has no joint weights");
-                StringAssert.Contains("\"" + ZombieFactory.ShambleClipName + "\"", json,
-                                      $"{variant} has no Shamble clip");
-                StringAssert.Contains("\"" + ZombieFactory.IdleClipName + "\"", json,
-                                      $"{variant} has no Idle clip");
-                StringAssert.Contains("\"" + ZombieFactory.LungeClipName + "\"", json,
-                                      $"{variant} has no Lunge clip");
-            }
-        }
-
-        /// The GLB layout is: 12-byte header, then chunks of (length, type, payload)
-        /// starting at offset 12. The first chunk is always the JSON document.
-        static string ExtractJsonChunk(byte[] bytes, int offset)
-        {
-            int chunkLength = System.BitConverter.ToInt32(bytes, offset);
-            int chunkType = System.BitConverter.ToInt32(bytes, offset + 4);
-            Assert.AreEqual(0x4E4F534A, chunkType, "First GLB chunk is not JSON");
-            return Encoding.UTF8.GetString(bytes, offset + 8, chunkLength);
+            var skin = prefab.GetComponentInChildren<SkinnedMeshRenderer>();
+            Assert.IsNotNull(skin);
+            Assert.GreaterOrEqual(skin.bones.Length, 100, "Expected Anny's 104-bone rig");
+            Assert.Greater(skin.sharedMesh.vertexCount, 10000, "Unexpectedly coarse mesh");
         }
     }
 }

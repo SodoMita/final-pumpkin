@@ -11,7 +11,7 @@ is independent of the exporter:
   * weights are normalised, joint indices are in range, hierarchy is connected
 
 Usage:
-    python tools/anny_zombies/verify_glb.py Assets/StreamingAssets/Zombies/*.glb
+    python tools/anny_zombies/verify_glb.py tools/anny_zombies/build/*.glb
 """
 
 from __future__ import annotations

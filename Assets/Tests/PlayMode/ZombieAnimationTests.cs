@@ -1,6 +1,5 @@
 using System.Collections;
 using System.Collections.Generic;
-using System.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
@@ -8,68 +7,59 @@ using UnityEngine.TestTools;
 namespace Foundation.Tests
 {
     /// <summary>
-    /// Loads the real Anny zombies through glTFast in play mode. This is the test
-    /// that proves the runtime pipeline works end to end: binary in
-    /// StreamingAssets -> skinned mesh in the scene -> legacy clips playing and
-    /// actually moving bones.
+    /// Spawns the real Anny zombies in play mode: FBX model, imported skeleton,
+    /// AI albedo, legacy clips playing and actually moving bones.
     /// </summary>
     public class ZombieAnimationTests
     {
-        readonly List<Zombie> _loaded = new List<Zombie>();
+        readonly List<Zombie> _spawned = new List<Zombie>();
 
         [UnityTearDown]
         public IEnumerator TearDown()
         {
-            foreach (Zombie zombie in _loaded) zombie.Dispose();
-            _loaded.Clear();
+            foreach (Zombie zombie in _spawned) zombie.Dispose();
+            _spawned.Clear();
             yield return null;
         }
 
-        Zombie Track(Zombie zombie)
+        Zombie Spawn(ZombieVariant variant)
         {
-            if (zombie != null) _loaded.Add(zombie);
+            Zombie zombie = ZombieFactory.Create(variant, null);
+            if (zombie != null) _spawned.Add(zombie);
             return zombie;
         }
 
-        static IEnumerator Await(Task<Zombie> task)
-        {
-            float deadline = Time.realtimeSinceStartup + 60f;
-            while (!task.IsCompleted && Time.realtimeSinceStartup < deadline) yield return null;
-            Assert.IsTrue(task.IsCompleted, "Zombie load timed out");
-        }
-
         [UnityTest]
-        public IEnumerator ShamblerLoadsWithSkinAndClips()
+        public IEnumerator ShamblerSpawnsWithSkinClipsAndTexture()
         {
-            Task<Zombie> task = ZombieFactory.CreateAsync(ZombieVariant.Shambler, null);
-            yield return Await(task);
-            Zombie zombie = Track(task.Result);
+            Zombie zombie = Spawn(ZombieVariant.Shambler);
+            yield return null;
 
-            Assert.IsNotNull(zombie, "Shambler failed to load");
-            Assert.IsNotNull(zombie.Root);
+            Assert.IsNotNull(zombie, "Shambler failed to spawn");
+            Assert.IsNotNull(zombie.Skin, "No SkinnedMeshRenderer");
             Assert.IsNotNull(zombie.Animation, "No legacy Animation component");
             Assert.IsNotNull(zombie.Driver, "No animation driver");
             Assert.AreEqual(3, zombie.Clips.Length, "Expected Shamble, Idle and Lunge");
-
-            var skinned = zombie.Root.GetComponentInChildren<SkinnedMeshRenderer>();
-            Assert.IsNotNull(skinned, "No SkinnedMeshRenderer");
-            Assert.GreaterOrEqual(skinned.bones.Length, 100, "Unexpectedly small skeleton");
-            Assert.Greater(skinned.sharedMesh.vertexCount, 1000);
+            Assert.GreaterOrEqual(zombie.Skin.bones.Length, 100, "Unexpectedly small skeleton");
             Assert.IsTrue(zombie.Height > 1.4f, $"Shambler is {zombie.Height:0.00} m tall");
+
+            Material material = zombie.Skin.sharedMaterial;
+            Assert.IsNotNull(material, "No material on the zombie");
+            Texture texture = material.HasProperty("_BaseMap") ? material.GetTexture("_BaseMap")
+                                                             : material.mainTexture;
+            Assert.IsNotNull(texture, "The AI albedo map was not applied");
         }
 
         [UnityTest]
-        public IEnumerator AllVariantsHaveDistinctHeights()
+        public IEnumerator VariantsHaveDistinctHeights()
         {
             var heights = new Dictionary<ZombieVariant, float>();
             foreach (ZombieVariant variant in ZombieFactory.AllVariants)
             {
-                Task<Zombie> task = ZombieFactory.CreateAsync(
-                    variant, null, new Vector3(100f * heights.Count, 0f, 100f));
-                yield return Await(task);
-                Zombie zombie = Track(task.Result);
-                Assert.IsNotNull(zombie, $"{variant} failed to load");
+                Zombie zombie = Spawn(variant);
+                Assert.IsNotNull(zombie, $"{variant} failed to spawn");
                 heights[variant] = zombie.Height;
+                yield return null;
             }
 
             Assert.AreEqual(4, heights.Count);
@@ -83,19 +73,16 @@ namespace Foundation.Tests
         [UnityTest]
         public IEnumerator PlaybackMovesTheSkeleton()
         {
-            Task<Zombie> task = ZombieFactory.CreateAsync(ZombieVariant.Bloater, null);
-            yield return Await(task);
-            Zombie zombie = Track(task.Result);
+            Zombie zombie = Spawn(ZombieVariant.Bloater);
+            yield return null;
             Assert.IsNotNull(zombie);
-
             Assert.IsTrue(zombie.Animation.isPlaying, "Animation is not playing");
             Assert.AreEqual(ZombieFactory.ShambleClipName, zombie.Driver.CurrentClip);
 
-            Transform[] bones = zombie.Root.GetComponentInChildren<SkinnedMeshRenderer>().bones;
+            Transform[] bones = zombie.Skin.bones;
             var before = new Quaternion[bones.Length];
             for (int i = 0; i < bones.Length; i++) before[i] = bones[i].localRotation;
 
-            // Let half a walk cycle through.
             float wait = Time.realtimeSinceStartup + 0.8f;
             while (Time.realtimeSinceStartup < wait) yield return null;
 
@@ -103,16 +90,14 @@ namespace Foundation.Tests
             for (int i = 0; i < bones.Length; i++)
                 moved = Mathf.Max(moved, Quaternion.Angle(before[i], bones[i].localRotation));
 
-            Assert.Greater(moved, 0.5f,
-                "No bone rotated, so the clips are not actually driving the rig");
+            Assert.Greater(moved, 0.5f, "No bone rotated, so the clips are not driving the rig");
         }
 
         [UnityTest]
         public IEnumerator DriverSwitchesBetweenClips()
         {
-            Task<Zombie> task = ZombieFactory.CreateAsync(ZombieVariant.Fresh, null);
-            yield return Await(task);
-            Zombie zombie = Track(task.Result);
+            Zombie zombie = Spawn(ZombieVariant.Fresh);
+            yield return null;
             Assert.IsNotNull(zombie);
 
             zombie.Driver.ForceState(ZombieAnimationDriver.State.Idle, 5f);
@@ -133,12 +118,10 @@ namespace Foundation.Tests
         {
             var host = new GameObject("ZombieTestHost");
             var spawner = host.AddComponent<ZombieSpawner>();
+            yield return null;
 
-            float deadline = Time.realtimeSinceStartup + 90f;
-            while (!spawner.LoadComplete && Time.realtimeSinceStartup < deadline) yield return null;
-
-            Assert.IsTrue(spawner.LoadComplete, "Spawner never finished loading");
-            Assert.IsFalse(spawner.LoadFailed, "At least one zombie failed to load");
+            Assert.IsTrue(spawner.LoadComplete, "Spawner never finished");
+            Assert.IsFalse(spawner.LoadFailed, "At least one zombie failed to spawn");
             Assert.AreEqual(ZombieSpawner.DefaultLayout.Length, spawner.LoadedCount);
 
             foreach (Zombie zombie in spawner.Zombies)

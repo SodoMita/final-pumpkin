@@ -1,14 +1,12 @@
 using System.Collections.Generic;
-using System.Threading.Tasks;
 using UnityEngine;
 
 namespace Foundation
 {
     /// <summary>
     /// Places the four Anny zombies in the level and keeps their animation
-    /// drivers pointed at the player. Loading is asynchronous (glTFast parses the
-    /// binaries over several frames), so the level appears first and the zombies
-    /// drop in a moment later.
+    /// drivers pointed at the player. The FBX models are imported by Unity, so
+    /// spawning is a plain Resources load and Instantiate.
     /// </summary>
     public sealed class ZombieSpawner : MonoBehaviour
     {
@@ -47,7 +45,7 @@ namespace Foundation
             get { return _zombies.Count; }
         }
 
-        /// <summary>True once every spawn attempt has finished, successfully or not.</summary>
+        /// <summary>True once every spawn attempt has run, successfully or not.</summary>
         public bool LoadComplete { get; private set; }
 
         /// <summary>True if at least one zombie failed to load.</summary>
@@ -63,30 +61,19 @@ namespace Foundation
             SpawnDefaults();
         }
 
-        /// <summary>Fire-and-forget entry point used by the level builder.</summary>
         public void SpawnDefaults()
         {
             if (LoadComplete || _zombies.Count > 0) return;
-            _ = SpawnAllAsync(DefaultLayout);
+            SpawnAll(DefaultLayout);
         }
 
-        public async Task SpawnAllAsync(IEnumerable<SpawnPoint> layout)
+        public void SpawnAll(IEnumerable<SpawnPoint> layout)
         {
-            LoadComplete = false;
             LoadFailed = false;
 
-            var tasks = new List<Task<Zombie>>();
             foreach (SpawnPoint point in layout)
             {
-                tasks.Add(ZombieFactory.CreateAsync(point.Variant, transform, point.Position, point.Yaw));
-            }
-
-            while (tasks.Count > 0)
-            {
-                Task<Zombie> finished = await Task.WhenAny(tasks);
-                tasks.Remove(finished);
-
-                Zombie zombie = finished.Result;
+                Zombie zombie = ZombieFactory.Create(point.Variant, transform, point.Position, point.Yaw);
                 if (zombie == null)
                 {
                     LoadFailed = true;

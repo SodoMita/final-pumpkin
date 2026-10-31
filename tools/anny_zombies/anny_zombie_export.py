@@ -15,7 +15,7 @@ The result is Y-up (Anny is Z-up), grounded at y=0, and ready for runtime loadin
 by Unity's glTFast.
 
 Usage:
-    python tools/anny_zombies/anny_zombie_export.py --variant shambler --out Assets/StreamingAssets/Zombies/zombie_shambler.glb
+    python tools/anny_zombies/anny_zombie_export.py --variant shambler --out tools/anny_zombies/build/zombie_shambler.glb
     python tools/anny_zombies/anny_zombie_export.py --probe
 """
 
@@ -85,7 +85,15 @@ VARIANTS: dict[str, dict] = {
     },
 }
 
-BASE_COLOUR = [0.42, 0.47, 0.36, 1.0]  # flat, untextured zombie skin
+BASE_COLOUR = [0.42, 0.47, 0.36, 1.0]  # fallback when no albedo is assigned
+
+# Anny's UV atlas is MakeHuman's "tights" layout: the body islands are unwrapped
+# but the head is one blob that ignores the face, so a portrait cannot be
+# projected into it. The head therefore gets its own lat-long chart, parked in a
+# free corner of the same atlas; tools/anny_zombies/texture_bake.py paints that
+# rectangle with the AI face and everything else with the AI skin.
+HEAD_BONES = ("head", "neck", "eye")
+HEAD_CHART = (0.02, 0.52, 0.34, 0.98)  # u0, v0, u1, v1
 
 # --------------------------------------------------------------------------- #
 # coordinate frames
@@ -275,6 +283,8 @@ COMPONENT_UINT = 5125
 class GltfBuilder:
     """Minimal glTF 2.0 binary writer: one skinned mesh, one skin, N clips."""
 
+    extras: dict = {}
+
     def __init__(self) -> None:
         self.bin = bytearray()
         self.accessors: list[dict] = []
@@ -338,6 +348,8 @@ class GltfBuilder:
         }
         if self.animations:
             document["animations"] = self.animations
+        if self.extras:
+            document["extras"] = self.extras
 
         json_bytes = json.dumps(document, separators=(",", ":")).encode("utf-8")
         while len(json_bytes) % 4:
@@ -372,6 +384,46 @@ def top_four(weights: np.ndarray, indices: np.ndarray) -> tuple[np.ndarray, np.n
     total = top_w.sum(axis=1, keepdims=True)
     total[total == 0.0] = 1.0
     return top_w / total, top_i
+
+
+def head_chart_coordinates(vertices: np.ndarray, faces: np.ndarray,
+                           corner_head: np.ndarray, strong: np.ndarray | None = None,
+                           eyes: np.ndarray | None = None) -> tuple[np.ndarray, dict]:
+    """Lat-long UVs for the head, laid out inside HEAD_CHART.
+
+    The model faces +Z, so azimuth 0 is the face; u wraps the full circle and v
+    runs from the crown (0) to the chin (1). Only corners flagged as head are
+    meaningful, but the mapping is computed for every vertex so seam triangles
+    can use it too.
+    """
+    # the chart has to be centred on the skull, not on the shoulder vertices that
+    # also touch the skull's triangles
+    if strong is not None and len(strong) > 0:
+        centre = strong.mean(axis=0)
+    else:
+        centre = vertices.mean(axis=0)
+    centre[1] = (vertices[corner_head.any() and np.unique(faces.reshape(-1)[corner_head])][:, 1].min()
+                 + vertices[np.unique(faces.reshape(-1)[corner_head])][:, 1].max()) / 2.0 \
+        if corner_head.any() else centre[1]
+    relative = vertices - centre
+    radius = np.maximum(np.linalg.norm(relative, axis=1), 1e-9)
+    azimuth = np.arctan2(relative[:, 0], relative[:, 2])
+    elevation = np.arcsin(np.clip(relative[:, 1] / radius, -1.0, 1.0))
+
+    u0, v0, u1, v1 = HEAD_CHART
+    u = u0 + ((azimuth + math.pi) / (2.0 * math.pi)) * (u1 - u0)
+    v = v0 + ((math.pi * 0.5 - elevation) / math.pi) * (v1 - v0)
+
+    # Publish the frame, so the texture baker lines the portrait up with this
+    # exact chart instead of guessing where the eyes ended up.
+    info = {"u0": u0, "v0": v0, "u1": u1, "v1": v1,
+            "centre": [float(c) for c in centre],
+            "eye_elevation": 0.0}
+    if eyes is not None and len(eyes):
+        eye_centroid = eyes.mean(axis=0)
+        relative = eye_centroid - centre
+        info["eye_elevation"] = float(np.arcsin(np.clip(relative[1] / max(np.linalg.norm(relative), 1e-9), -1, 1)))
+    return np.stack([u, v], axis=1), info
 
 
 def skin_frame(joint_globals: np.ndarray, bind_inverse: np.ndarray,
@@ -413,7 +465,6 @@ def bake_variant(model, variant: str, with_animations: bool = True) -> tuple[Glt
     # character-space axes -> bone rest frames (Y-up world)
     rest_root_translation = np.eye(4)
     rest_root_translation[:3, 3] = globals_[0, :3, 3]
-    rest_positions = vertices.astype(np.float64)
 
     locals_ = local_from_global(globals_, parents)
 
@@ -430,7 +481,53 @@ def bake_variant(model, variant: str, with_animations: bool = True) -> tuple[Glt
 
     faces = np.asarray(model.faces, dtype=np.int64).reshape(-1, 3)
 
-    # flat-ish normals from the faces (the mesh is dense enough to shade smoothly)
+    weights, joint_indices = top_four(
+        np.asarray(model.vertex_bone_weights.detach().cpu().numpy(), dtype=np.float64),
+        np.asarray(model.vertex_bone_indices.detach().cpu().numpy(), dtype=np.int64),
+    )
+
+    # Anny keeps its UV atlas separate from the positions (21334 UVs for 13718
+    # vertices), so the mesh has to be split along the UV seams the way a normal
+    # exporter would: one vertex per unique (position, uv) pair.
+    uv_all = np.asarray(model.texture_coordinates.detach().cpu().numpy(), dtype=np.float64)
+    face_uv_all = np.asarray(model.face_texture_coordinate_indices.detach().cpu().numpy(), dtype=np.int64).reshape(-1)
+
+    # per-corner UVs: Anny's atlas, except that every corner of a head triangle
+    # is moved onto the head chart (a face may not straddle the two, or it would
+    # stretch across the atlas)
+    corner_uv = uv_all[face_uv_all].copy()
+    original_faces = faces.copy()
+    head_joints = np.array([any(key in label for key in HEAD_BONES) for label in labels])
+    head_weight = np.zeros(len(labels))
+    head_weight[head_joints] = 1.0
+    head_influence = (weights * head_weight[joint_indices]).sum(axis=1)
+    vertex_head = head_influence > 0.15
+    corner_head = vertex_head[original_faces.reshape(-1)].reshape(-1, 3).any(axis=1)
+    corner_head = corner_head[:, None].repeat(3, axis=1).reshape(-1)
+
+    eye_labels = [i for i, label in enumerate(labels) if label.startswith("eye")]
+    eyes = globals_[eye_labels, :3, 3] if eye_labels else None
+    chart_uv, chart_info = head_chart_coordinates(vertices, original_faces, corner_head,
+                                                  strong=vertices[head_influence > 0.55],
+                                                  eyes=eyes)
+    corner_uv[corner_head] = chart_uv[original_faces.reshape(-1)][corner_head]
+
+    keys = original_faces.reshape(-1).astype(np.int64) * (1 << 24) + \
+        (corner_uv[:, 0] * 65535).astype(np.int64) * 256 + (corner_uv[:, 1] * 65535).astype(np.int64)
+    _, first_corner, inverse = np.unique(keys, return_index=True, return_inverse=True)
+    source_vertex = original_faces.reshape(-1)[first_corner]
+    faces = inverse.reshape(-1, 3).astype(np.int64)
+
+    vertices = vertices[source_vertex]
+    weights = weights[source_vertex]
+    joint_indices = joint_indices[source_vertex]
+    uvs = corner_uv[first_corner]
+
+    # the animation grounding below skins the bind pose, so it has to use the
+    # expanded vertex set too
+    rest_positions = vertices.astype(np.float64)
+
+    position_accessor = builder.accessor(vertices.astype(np.float32), COMPONENT_FLOAT, "VEC3", target=34962)
     normals = np.zeros_like(vertices)
     tri = vertices[faces]
     face_normals = np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0])
@@ -440,12 +537,7 @@ def bake_variant(model, variant: str, with_animations: bool = True) -> tuple[Glt
     lengths[lengths == 0.0] = 1.0
     normals /= lengths
 
-    weights, joint_indices = top_four(
-        np.asarray(model.vertex_bone_weights.detach().cpu().numpy(), dtype=np.float64),
-        np.asarray(model.vertex_bone_indices.detach().cpu().numpy(), dtype=np.int64),
-    )
-
-    position_accessor = builder.accessor(vertices.astype(np.float32), COMPONENT_FLOAT, "VEC3", target=34962)
+    uv_accessor = builder.accessor(uvs.astype(np.float32), COMPONENT_FLOAT, "VEC2", target=34962)
     normal_accessor = builder.accessor(normals.astype(np.float32), COMPONENT_FLOAT, "VEC3", target=34962)
     joints_accessor = builder.accessor(joint_indices.astype(np.uint16), COMPONENT_USHORT, "VEC4", target=34962)
     weights_accessor = builder.accessor(weights.astype(np.float32), COMPONENT_FLOAT, "VEC4", target=34962)
@@ -456,6 +548,7 @@ def bake_variant(model, variant: str, with_animations: bool = True) -> tuple[Glt
         "primitives": [{
             "attributes": {
                 "POSITION": position_accessor,
+                "TEXCOORD_0": uv_accessor,
                 "NORMAL": normal_accessor,
                 "JOINTS_0": joints_accessor,
                 "WEIGHTS_0": weights_accessor,
@@ -496,6 +589,7 @@ def bake_variant(model, variant: str, with_animations: bool = True) -> tuple[Glt
     builder.mesh_node = len(builder.nodes)
     builder.nodes.append({"name": "ZombieBody", "mesh": 0, "skin": 0})
 
+    builder.extras["head_chart"] = chart_info
     info = {"variant": variant, "vertices": int(len(vertices)),
             "triangles": int(len(faces)), "bones": bone_count}
 

@@ -1,15 +1,14 @@
-using System;
+using System.Collections.Generic;
 using System.IO;
-using System.Threading.Tasks;
-using GLTFast;
 using UnityEngine;
-using UnityEngine.Networking;
 
 namespace Foundation
 {
     /// <summary>
     /// The four zombies generated from the naver/anny parametric body model by
-    /// <c>tools/anny_zombies/anny_zombie_export.py</c>.
+    /// <c>tools/anny_zombies/anny_zombie_export.py</c>, converted to FBX by
+    /// <c>tools/anny_zombies/bake_fbx.py</c> and painted by
+    /// <c>tools/anny_zombies/texture_bake.py</c>.
     /// </summary>
     public enum ZombieVariant
     {
@@ -19,199 +18,173 @@ namespace Foundation
         Small,
     }
 
-    /// <summary>One loaded zombie instance plus its animation plumbing.</summary>
-    public sealed class Zombie : IDisposable
+    /// <summary>One spawned zombie plus its animation plumbing.</summary>
+    public sealed class Zombie
     {
         public ZombieVariant Variant { get; internal set; }
         public GameObject Root { get; internal set; }
-        public Transform Scene { get; internal set; }
+        public SkinnedMeshRenderer Skin { get; internal set; }
         public Animation Animation { get; internal set; }
         public ZombieAnimationDriver Driver { get; internal set; }
         public AnimationClip[] Clips { get; internal set; }
-        internal GltfImport Import { get; set; }
 
         public float Height
         {
-            get
-            {
-                Renderer renderer = Root != null ? Root.GetComponentInChildren<Renderer>() : null;
-                return renderer != null ? renderer.bounds.size.y : 0f;
-            }
+            get { return Skin != null ? Skin.bounds.size.y : 0f; }
         }
 
         public void Dispose()
         {
-            if (Root != null) UnityEngine.Object.Destroy(Root);
+            if (Root != null) Object.Destroy(Root);
             Root = null;
+            Skin = null;
             Animation = null;
             Driver = null;
             Clips = null;
-
-            if (Import != null)
-            {
-                Import.Dispose();
-                Import = null;
-            }
         }
     }
 
     /// <summary>
-    /// Loads the Anny-authored glTF-binary zombies at runtime.
+    /// Spawns the Anny zombies through Unity's own model importer.
     ///
-    /// The meshes ship in StreamingAssets instead of Assets/Models because the
-    /// project has no Editor importer for .glb: anything else under Assets/
-    /// would be ignored by Unity. glTFast turns the binaries into
-    /// SkinnedMeshRenderers with a 104-bone skeleton and the baked
-    /// Shamble/Idle/Lunge clips; the import is pinned to the legacy animation
-    /// method so a plain <see cref="Animation"/> component can play them
-    /// (Mecanim controllers cannot be built in a player build).
+    /// The FBX files live in Resources/Zombies and are imported by
+    /// Assets/Editor/ZombieModelImporter.cs with a Legacy rig, so each zombie
+    /// arrives with a SkinnedMeshRenderer, the 104-bone Anny skeleton and the
+    /// three baked clips already on an Animation component - no runtime glTF
+    /// package, no shader-side curve sampling, no conversion step in the build.
+    /// The AI-generated albedo map sits next to each FBX and is applied here.
     /// </summary>
     public static class ZombieFactory
     {
-        public const string FolderName = "Zombies";
+        public const string ResourceFolder = "Zombies";
         public const string ShambleClipName = "Shamble";
         public const string IdleClipName = "Idle";
         public const string LungeClipName = "Lunge";
 
+        /// <summary>Tint used when a variant's albedo map is missing.</summary>
+        public static readonly Color FallbackColour = new Color(0.42f, 0.47f, 0.36f);
+
         public static ZombieVariant[] AllVariants =>
-            (ZombieVariant[])Enum.GetValues(typeof(ZombieVariant));
+            (ZombieVariant[])System.Enum.GetValues(typeof(ZombieVariant));
 
-        public static string FileName(ZombieVariant variant)
+        public static string ModelPath(ZombieVariant variant)
         {
-            return "zombie_" + variant.ToString().ToLowerInvariant() + ".glb";
+            return ResourceFolder + "/zombie_" + variant.ToString().ToLowerInvariant();
         }
 
-        public static string StreamingFolder
+        public static string AlbedoPath(ZombieVariant variant)
         {
-            get { return Path.Combine(Application.streamingAssetsPath, FolderName); }
+            return ModelPath(variant) + "_albedo";
         }
 
-        public static string StreamingPath(ZombieVariant variant)
+        /// <summary>Instantiates one zombie under <paramref name="parent"/>.</summary>
+        public static Zombie Create(ZombieVariant variant, Transform parent,
+                                    Vector3 position = default, float yawDegrees = 0f)
         {
-            return Path.Combine(StreamingFolder, FileName(variant));
-        }
-
-        /// <summary>Loads and instantiates one zombie under <paramref name="parent"/>.</summary>
-        public static async Task<Zombie> CreateAsync(
-            ZombieVariant variant,
-            Transform parent,
-            Vector3 position = default,
-            float yawDegrees = 0f)
-        {
-            string path = StreamingPath(variant);
-            byte[] bytes = await ReadBytesAsync(path);
-            if (bytes == null || bytes.Length == 0)
+            var prefab = Resources.Load<GameObject>(ModelPath(variant));
+            if (prefab == null)
             {
-                Debug.LogError($"ZombieFactory: could not read {path}");
+                Debug.LogError($"ZombieFactory: no model at Resources/{ModelPath(variant)}");
                 return null;
             }
 
-            var root = new GameObject("Zombie_" + variant);
+            GameObject root = Object.Instantiate(prefab);
+            root.name = "Zombie_" + variant;
             if (parent != null) root.transform.SetParent(parent, false);
             root.transform.position = position;
             root.transform.rotation = Quaternion.Euler(0f, yawDegrees, 0f);
-
-            var import = new GltfImport();
-            var importSettings = new ImportSettings { AnimationMethod = AnimationMethod.Legacy };
-            bool loaded = await import.LoadGltfBinary(bytes, new Uri(path), importSettings);
-            if (!loaded)
-            {
-                Debug.LogError($"ZombieFactory: glTFast failed to load {path}");
-                UnityEngine.Object.Destroy(root);
-                import.Dispose();
-                return null;
-            }
-
-            var settings = new InstantiationSettings
-            {
-                SceneObjectCreation = SceneObjectCreation.Always,
-                SkinUpdateWhenOffscreen = true,
-            };
-            var instantiator = new GameObjectInstantiator(import, root.transform, null, settings);
-            bool instantiated = await import.InstantiateMainSceneAsync(instantiator);
-            if (!instantiated)
-            {
-                Debug.LogError($"ZombieFactory: glTFast failed to instantiate {path}");
-                UnityEngine.Object.Destroy(root);
-                import.Dispose();
-                return null;
-            }
-
-            Transform scene = instantiator.SceneTransform;
-            AnimationClip[] clips = import.GetAnimationClips();
-            Animation animation = ConfigureAnimation(instantiator, clips);
 
             var zombie = new Zombie
             {
                 Variant = variant,
                 Root = root,
-                Scene = scene,
-                Animation = animation,
-                Clips = clips,
-                Import = import,
+                Skin = root.GetComponentInChildren<SkinnedMeshRenderer>(),
+                Animation = root.GetComponentInChildren<Animation>(),
             };
 
-            if (animation != null) zombie.Driver = scene.gameObject.AddComponent<ZombieAnimationDriver>();
-            if (zombie.Driver != null) zombie.Driver.Bind(animation);
+            if (zombie.Skin == null)
+            {
+                Debug.LogError($"ZombieFactory: {variant} has no SkinnedMeshRenderer");
+                Object.Destroy(root);
+                return null;
+            }
+
+            ApplyAlbedo(zombie);
+            zombie.Clips = ConfigureAnimation(zombie.Animation);
+
+            if (zombie.Animation != null)
+            {
+                zombie.Driver = root.AddComponent<ZombieAnimationDriver>();
+                zombie.Driver.Bind(zombie.Animation);
+            }
 
             return zombie;
         }
 
-        /// <summary>
-        /// glTFast already attached an Animation component and registered every
-        /// clip on it (all clips come back as WrapMode.Loop). All that is left is
-        /// to make Lunge a one-shot and start on the walk cycle.
-        /// </summary>
-        static Animation ConfigureAnimation(GameObjectInstantiator instantiator, AnimationClip[] clips)
+        /// <summary>The AI albedo map, applied to every material slot of the mesh.</summary>
+        static void ApplyAlbedo(Zombie zombie)
         {
-            if (instantiator == null || instantiator.SceneInstance == null) return null;
-
-            Animation animation = instantiator.SceneInstance.LegacyAnimation;
-            if (animation == null) return null;
-
-            foreach (AnimationClip clip in clips)
+            var albedo = Resources.Load<Texture2D>(AlbedoPath(zombie.Variant));
+            if (albedo == null)
             {
+                Debug.LogWarning($"ZombieFactory: no albedo for {zombie.Variant}, using the flat colour");
+                MaterialFactory.Apply(zombie.Skin, FallbackColour, 0.3f);
+                return;
+            }
+
+            Material material = MaterialFactory.Textured(albedo, Color.white, 0.3f);
+            if (material == null) return;
+
+            var materials = new Material[zombie.Skin.sharedMaterials.Length];
+            for (int i = 0; i < materials.Length; i++) materials[i] = material;
+            zombie.Skin.sharedMaterials = materials;
+        }
+
+        /// <summary>
+        /// Collects the clips the importer produced and sets their wrap modes:
+        /// Lunge is a one-shot, the other two loop.
+        /// </summary>
+        static AnimationClip[] ConfigureAnimation(Animation animation)
+        {
+            if (animation == null) return new AnimationClip[0];
+
+            var clips = new List<AnimationClip>();
+            foreach (AnimationState state in animation)
+            {
+                AnimationClip clip = state.clip;
                 if (clip == null) continue;
                 clip.wrapMode = clip.name == LungeClipName ? WrapMode.Once : WrapMode.Loop;
+                clips.Add(clip);
             }
 
             animation.playAutomatically = false;
             animation.wrapMode = WrapMode.Loop;
 
-            AnimationClip first = FindClip(clips, ShambleClipName) ?? (clips.Length > 0 ? clips[0] : null);
+            AnimationClip first = FindClip(clips, ShambleClipName);
             if (first != null)
             {
                 animation.clip = first;
                 animation.Play(first.name);
             }
-            return animation;
+            return clips.ToArray();
         }
 
-        static AnimationClip FindClip(AnimationClip[] clips, string name)
+        static AnimationClip FindClip(List<AnimationClip> clips, string name)
         {
             foreach (AnimationClip clip in clips)
                 if (clip != null && clip.name == name) return clip;
-            return null;
+            return clips.Count > 0 ? clips[0] : null;
         }
 
-        /// <summary>
-        /// UnityWebRequest instead of File.ReadAllBytes so the same call works on
-        /// Android, where StreamingAssets lives inside the APK.
-        /// </summary>
-        static async Task<byte[]> ReadBytesAsync(string path)
+        /// <summary>True when every variant has both its model and its albedo map.</summary>
+        public static bool AllAssetsPresent()
         {
-            string uri = path.Contains("://") ? path : "file://" + path;
-            using (UnityWebRequest request = UnityWebRequest.Get(uri))
+            foreach (ZombieVariant variant in AllVariants)
             {
-                request.downloadHandler = new DownloadHandlerBuffer();
-                await request.SendWebRequest();
-                if (request.result != UnityWebRequest.Result.Success)
-                {
-                    Debug.LogError($"ZombieFactory: {uri} -> {request.error}");
-                    return null;
-                }
-                return request.downloadHandler.data;
+                if (Resources.Load<GameObject>(ModelPath(variant)) == null) return false;
+                if (Resources.Load<Texture2D>(AlbedoPath(variant)) == null) return false;
             }
+            return true;
         }
     }
 }

@@ -61,6 +61,20 @@ namespace Foundation
             return material;
         }
 
+        /// <summary>Textured variant: same pipeline-aware material, plus a map.</summary>
+        public static Material Textured(Texture2D albedo, Color tint, float smoothness = 0.25f)
+        {
+            Material material = Lit(tint, smoothness);
+            if (material == null) return null;
+
+            if (albedo != null)
+            {
+                if (material.HasProperty("_BaseMap")) material.SetTexture("_BaseMap", albedo);
+                if (material.HasProperty("_MainTex")) material.SetTexture("_MainTex", albedo);
+            }
+            return material;
+        }
+
         public static void Apply(Renderer renderer, Color color, float smoothness = 0.12f)
         {
             if (renderer == null) return;
