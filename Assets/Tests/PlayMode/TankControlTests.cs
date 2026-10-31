@@ -71,6 +71,20 @@ namespace Foundation.Tests
             yield return null;
         }
 
+        /// Everything that could explain "the character did not walk".
+        string State(Vector3 start)
+        {
+            InputService input = InputService.Instance;
+            var cc = _player.GetComponent<CharacterController>();
+            Vector3 delta = _player.transform.position - start;
+            return $"moved={HorizontalDistance(start, _player.transform.position):0.000} " +
+                   $"height={delta.y:0.00} MoveAxis={input.MoveAxis:0.00} TurnAxis={input.TurnAxis:0.00} " +
+                   $"aim={_tank.Aiming} frozen={_tank.Frozen} grounded={(cc != null && cc.isGrounded)} " +
+                   $"walk={_settings.walkSpeed:0.00} run={_settings.runSpeed:0.00} " +
+                   $"deltaTime={Time.deltaTime:0.0000} timeScale={Time.timeScale:0.00} " +
+                   $"frame={Time.frameCount} pos={_player.transform.position}";
+        }
+
         static float HorizontalDistance(Vector3 a, Vector3 b)
         {
             Vector3 delta = a - b;
@@ -110,7 +124,7 @@ namespace Foundation.Tests
 
             Vector3 delta = _player.transform.position - start;
             delta.y = 0f;
-            Assert.Greater(delta.magnitude, 0.2f, "holding forward should actually walk");
+            Assert.Greater(delta.magnitude, 0.2f, "holding forward should actually walk: " + State(start));
             Assert.Greater(Vector3.Dot(delta.normalized, _player.transform.forward), 0.9f,
                 "movement must follow the character's own facing, not the camera");
             Assert.Less(Quaternion.Angle(startRotation, _player.transform.rotation), 1f,
@@ -141,7 +155,7 @@ namespace Foundation.Tests
 
             Vector3 delta = _player.transform.position - start;
             delta.y = 0f;
-            Assert.Greater(delta.magnitude, 0.1f);
+            Assert.Greater(delta.magnitude, 0.1f, "walking after a turn should move: " + State(start));
             Assert.Greater(Vector3.Dot(delta.normalized, facing), 0.9f,
                 "after a turn, forward must mean the new facing direction");
         }
@@ -156,7 +170,7 @@ namespace Foundation.Tests
 
             Vector3 delta = _player.transform.position - start;
             delta.y = 0f;
-            Assert.Greater(delta.magnitude, 0.05f);
+            Assert.Greater(delta.magnitude, 0.05f, "backpedalling should move: " + State(start));
             Assert.Less(Vector3.Dot(delta.normalized, _player.transform.forward), -0.5f,
                 "backpedalling moves backwards while still facing forwards");
             Assert.Less(Quaternion.Angle(startRotation, _player.transform.rotation), 1f);
@@ -200,7 +214,8 @@ namespace Foundation.Tests
             InputService.Instance.SetVirtualHold(GameAction.Run, false);
             yield return null;
 
-            Assert.Greater(runDistance, walkDistance * 1.1f, "running should cover more ground");
+            Assert.Greater(runDistance, walkDistance * 1.1f,
+                $"running should cover more ground: walk={walkDistance:0.000} run={runDistance:0.000} " + State(runStart));
         }
 
         [UnityTest]
@@ -238,7 +253,7 @@ namespace Foundation.Tests
 
             Vector3 delta = _player.transform.position - start;
             delta.y = 0f;
-            Assert.Greater(delta.magnitude, 0.1f, "the character should still walk");
+            Assert.Greater(delta.magnitude, 0.1f, "the character should still walk: " + State(start));
             Assert.Greater(Vector3.Dot(delta.normalized, facing), 0.9f,
                 "movement follows the character, not the camera");
             Assert.Less(Quaternion.Angle(startRotation, _player.transform.rotation), 1f,

@@ -12,6 +12,13 @@ name: Unity tests
 # Without these three secrets the runner fails at activation; nothing else in
 # the repo depends on them.
 
+# The test runner posts a check run with the results, which needs explicit
+# permission on repositories with read-only default tokens.
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
 on:
   push:
     branches: [main]
