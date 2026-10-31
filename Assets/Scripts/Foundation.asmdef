@@ -2,7 +2,8 @@
     "name": "Foundation",
     "rootNamespace": "Foundation",
     "references": [
-        "UnityEngine.UI"
+        "UnityEngine.UI",
+        "glTFast"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

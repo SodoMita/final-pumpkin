@@ -24,6 +24,7 @@ namespace Foundation
             Transform player = BuildPlayer(root);
             BuildGeometry(root);
             BuildCameras(root, player);
+            BuildZombies(root, player);
 
             BuildHud(root);
             root.gameObject.AddComponent<PauseScreen>().Build();
@@ -87,6 +88,17 @@ namespace Foundation
             tank.Feet = feet.transform;
 
             return player.transform;
+        }
+
+        /// The Anny zombies are loaded at runtime from StreamingAssets, so this
+        /// only creates the container and the spawner; the meshes appear a few
+        /// frames later.
+        static void BuildZombies(Transform root, Transform player)
+        {
+            var container = new GameObject("Zombies");
+            container.transform.SetParent(root, false);
+            var spawner = container.AddComponent<ZombieSpawner>();
+            spawner.Target = player;
         }
 
         static void BuildGeometry(Transform root)

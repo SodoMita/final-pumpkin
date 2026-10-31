@@ -52,3 +52,11 @@ sysinfo.txt
 crashlytics-build.properties
 .DS_Store
 Thumbs.db
+
+# Python bytecode (tools/)
+__pycache__/
+*.pyc
+
+# Python bytecode (tools/)
+__pycache__/
+*.pyc
