@@ -33,9 +33,11 @@ namespace Foundation.EditorTools
             importer.meshCompression = ModelImporterMeshCompression.Off;
             importer.optimizeMeshPolygons = false;
             importer.optimizeMeshVertices = false;
+            // Deliberately no SearchAndRemapMaterials here: calling it from
+            // OnPreprocessModel makes Unity reimport the model forever, which
+            // hangs the batch-mode test runner. The factory assigns its own
+            // textured material anyway, so the importer's default is fine.
             importer.materialImportMode = ModelImporterMaterialImportMode.ImportStandard;
-            importer.SearchAndRemapMaterials(ModelImporterMaterialName.BasedOnMaterialName,
-                                            ModelImporterMaterialSearch.Everywhere);
         }
     }
 }
