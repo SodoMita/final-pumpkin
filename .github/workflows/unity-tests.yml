@@ -50,14 +50,15 @@ jobs:
           lfs: true
           fetch-depth: 0
 
+      # Only an exact match is restored. A Library built from a different asset
+      # tree leaves the AssetDatabase pointing at deleted folders, which makes
+      # every import fail with "Build asset version error" and URP then retries
+      # that import forever - the editor wedges before a single test runs.
       - name: Cache Unity Library
         uses: actions/cache@v4
         with:
           path: Library
-          key: Library-${{ matrix.testMode }}-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
-          restore-keys: |
-            Library-${{ matrix.testMode }}-
-            Library-
+          key: Library-v2-${{ matrix.testMode }}-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
 
       - name: Run ${{ matrix.testMode }} tests
         id: tests
@@ -73,12 +74,20 @@ jobs:
           artifactsPath: ${{ matrix.testMode }}-artifacts
           githubToken: ${{ secrets.GITHUB_TOKEN }}
           checkName: ${{ matrix.testMode }} results
-          # -force-free keeps the editor on the free license instead of waiting on
-          # an entitlement refresh, which is where the batch-mode runs stalled.
-          customParameters: -nographics -force-free
+          customParameters: -nographics
           # Pin the game-ci CLI instead of resolving "latest" through the GitHub API,
           # which can return 403 when the runner's shared IP is rate limited.
           cliVersion: v0.1.72
+
+      # The editor log is the only clue when a run wedges, and a cancelled job
+      # still runs always() steps, so keep it.
+      - name: Upload Unity logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unity-logs-${{ matrix.testMode }}
+          path: ${{ matrix.testMode }}-artifacts
+          if-no-files-found: warn
 
       - name: Upload test results
         if: always()
@@ -104,10 +113,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: Library
-          key: Library-StandaloneLinux64-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
-          restore-keys: |
-            Library-StandaloneLinux64-
-            Library-
+          key: Library-v2-StandaloneLinux64-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
 
       - name: Build
         uses: game-ci/unity-builder@v4
